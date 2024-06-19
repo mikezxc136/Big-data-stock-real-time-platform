@@ -28,16 +28,25 @@ def create_tables():
     );
     """)
 
+    # Tạo bảng dim_price
+    cursor.execute("""
+    DROP TABLE IF EXISTS dim_price CASCADE;
+    CREATE TABLE dim_price (
+        price_id SERIAL PRIMARY KEY,
+        open NUMERIC,
+        high NUMERIC,
+        low NUMERIC,
+        close NUMERIC
+    );
+    """)
+
     # Tạo bảng fact_stock
     cursor.execute("""
     DROP TABLE IF EXISTS fact_stock CASCADE;
     CREATE TABLE fact_stock (
         stock_id INT REFERENCES dim_stock(stock_id),
         date_id INT REFERENCES dim_date(date_id),
-        open NUMERIC,
-        high NUMERIC,
-        low NUMERIC,
-        close NUMERIC,
+        price_id INT REFERENCES dim_price(price_id),
         volume BIGINT,
         PRIMARY KEY (stock_id, date_id)
     );

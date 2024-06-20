@@ -3,36 +3,40 @@ import json
 import threading
 import time
 
-import pandas as pd
+import mysql.connector
 import psycopg2
-import yfinance as yf
+
 from kafka import KafkaConsumer, KafkaProducer
 
-# Path to the CSV file containing tickers
-CSV_FILE_PATH = 'D:\\Github Mikezxc\\Big-data-stock-real-time-platform\\kafka\\modeling_test\\tickers.csv'
 
-# Hàm để lấy dữ liệu cổ phiếu
-def fetch_stock_data(ticker, start_date, end_date, interval='1d'):
-    stock = yf.Ticker(ticker)
-    data = stock.history(start=start_date, end=end_date, interval=interval)
-    data.reset_index(inplace=True)
-    return data
-
-# Hàm để gửi dữ liệu vào Kafka
-def send_to_kafka(data, producer, topic, ticker):
-    for index, row in data.iterrows():
-        datetime_key = 'Datetime' if 'Datetime' in row else 'Date'
-        message = {
-            'Ticker': ticker,
-            'Datetime': row[datetime_key].strftime('%Y-%m-%d %H:%M:%S'),
-            'Open': float(row['Open']),
-            'High': float(row['High']),
-            'Low': float(row['Low']),
-            'Close': float(row['Close']),
-            'Volume': int(row['Volume'])
-        }
-        producer.send(topic, value=message)
+# Hàm để gửi dữ liệu từ MySQL vào Kafka
+def stream_mysql_to_kafka():
+    conn = mysql.connector.connect(
+        user='mike',
+        password='123',
+        host='localhost',
+        database='stock_stream'
+    )
+    cursor = conn.cursor(dictionary=True)
+    
+    query = "SELECT * FROM stock_data"
+    cursor.execute(query)
+    rows = cursor.fetchall()
+    
+    producer = KafkaProducer(
+        bootstrap_servers='localhost:9092',
+        value_serializer=lambda v: json.dumps(v, default=str).encode('utf-8')
+    )
+    
+    for row in rows:
+        # Convert datetime objects to strings
+        if 'Datetime' in row and isinstance(row['Datetime'], datetime.datetime):
+            row['Datetime'] = row['Datetime'].strftime('%Y-%m-%d %H:%M:%S')
+        producer.send('mysql-to-postgres', value=row)
         producer.flush()
+    
+    cursor.close()
+    conn.close()
 
 # Hàm để chèn dữ liệu vào PostgreSQL
 def insert_data(data):
@@ -85,7 +89,7 @@ def insert_data(data):
 def consume_messages():
     try:
         consumer = KafkaConsumer(
-            'stock_topic',
+            'mysql-to-postgres',
             bootstrap_servers='localhost:9092',
             auto_offset_reset='latest',
             enable_auto_commit=True,
@@ -105,41 +109,16 @@ def consume_messages():
 
 # Hàm chính
 def main():
-    # Thiết lập Kafka producer
-    producer = KafkaProducer(
-        bootstrap_servers='localhost:9092',
-        value_serializer=lambda v: json.dumps(v).encode('utf-8')
-    )
-
     # Tạo một thread để tiêu thụ dữ liệu từ Kafka và chèn vào PostgreSQL
     consumer_thread = threading.Thread(target=consume_messages, daemon=True)
     consumer_thread.start()
 
-    # Đọc file CSV để lấy danh sách ticker
-    tickers_df = pd.read_csv(CSV_FILE_PATH)
-    tickers = tickers_df['Ticker'].tolist()
+    # Gửi dữ liệu từ MySQL tới Kafka
+    stream_mysql_to_kafka()
 
-    # Lấy dữ liệu cổ phiếu và gửi vào Kafka
-    start_date = datetime.datetime(2015, 1, 1)
-    end_date = datetime.datetime.now()
-
-    for ticker in tickers:
-        # Fetch historical data in daily intervals
-        historical_data = fetch_stock_data(ticker, start_date, end_date, interval='1d')
-        send_to_kafka(historical_data, producer, 'stock_topic', ticker)
-
-    # Continue fetching recent data in 1-minute intervals
+    # Keep the main thread running to allow the consumer thread to keep processing messages
     while True:
-        try:
-            current_time = datetime.datetime.now()
-            recent_start_time = current_time - datetime.timedelta(days=1)
-            for ticker in tickers:
-                recent_data = fetch_stock_data(ticker, recent_start_time, current_time, interval='1m')
-                if not recent_data.empty:
-                    send_to_kafka(recent_data, producer, 'stock_topic', ticker)
-            time.sleep(600)  # Đợi 10 phút trước khi lấy dữ liệu mới
-        except Exception as e:
-            print(f"Error fetching or sending data: {e}")
+        time.sleep(6000)
 
 if __name__ == "__main__":
     main()

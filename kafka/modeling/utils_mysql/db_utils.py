@@ -2,6 +2,8 @@ import json
 
 import mysql.connector
 
+from kafka import KafkaProducer
+
 MYSQL_CONFIG_PATH = 'D:\\Github Mikezxc\\Big-data-stock-real-time-platform\\kafka\\modeling\\config\\env_mysql.json'
 
 def load_mysql_config():

@@ -2,7 +2,7 @@ import json
 
 from kafka import KafkaConsumer, KafkaProducer
 
-from .db_utils import insert_data
+from .db_utils import insert_data, update_last_processed_time
 
 
 def consume_messages():

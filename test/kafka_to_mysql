@@ -12,6 +12,16 @@ from kafka import KafkaConsumer, KafkaProducer
 # Path to the CSV file containing tickers
 CSV_FILE_PATH = 'D:\\Github Mikezxc\\Big-data-stock-real-time-platform\\kafka\\modeling\\tickers.csv'
 
+# Path to the MySQL configuration file
+MYSQL_CONFIG_PATH = 'D:\\Github Mikezxc\\Big-data-stock-real-time-platform\\kafka\\modeling\\config\\env_mysql.json'
+
+# Hàm để đọc cấu hình MySQL từ file JSON
+def load_mysql_config():
+    with open(MYSQL_CONFIG_PATH, 'r') as file:
+        return json.load(file)
+
+mysql_config = load_mysql_config()
+
 # Hàm để lấy dữ liệu cổ phiếu
 def fetch_stock_data(ticker, start_date, end_date, interval='1d'):
     stock = yf.Ticker(ticker)
@@ -38,12 +48,7 @@ def send_to_kafka(data, producer, topic, ticker):
         update_last_processed_time(ticker, data[datetime_key].max())
 
 def update_last_processed_time(ticker, last_processed_time):
-    conn = mysql.connector.connect(
-        user='mike',
-        password='123',
-        host='localhost',
-        database='stock_stream'
-    )
+    conn = mysql.connector.connect(**mysql_config)
     cursor = conn.cursor()
     query = """
     INSERT INTO ticker_status (Ticker, LastProcessedTime)
@@ -57,12 +62,7 @@ def update_last_processed_time(ticker, last_processed_time):
     conn.close()
 
 def get_last_processed_time(ticker):
-    conn = mysql.connector.connect(
-        user='mike',
-        password='123',
-        host='localhost',
-        database='stock_stream'
-    )
+    conn = mysql.connector.connect(**mysql_config)
     cursor = conn.cursor()
     query = "SELECT LastProcessedTime FROM ticker_status WHERE Ticker = %s"
     cursor.execute(query, (ticker,))
@@ -74,10 +74,10 @@ def get_last_processed_time(ticker):
 # Hàm để tạo database và bảng nếu chưa tồn tại
 def create_database_and_table():
     conn = mysql.connector.connect(
-            user='mike',
-            password='123',
-            host='localhost',
-            port='3306'
+        user=mysql_config['user'],
+        password=mysql_config['password'],
+        host=mysql_config['host'],
+        port=mysql_config['port']
     )
     cursor = conn.cursor()
     
@@ -108,12 +108,7 @@ def create_database_and_table():
 
 # Hàm để chèn dữ liệu vào MySQL
 def insert_data(data):
-    conn = mysql.connector.connect(
-        user='mike',
-        password='123',
-        host='localhost',
-        database='stock_stream'
-    )
+    conn = mysql.connector.connect(**mysql_config)
     cursor = conn.cursor()
 
     # Check if the record already exists
@@ -164,7 +159,7 @@ def consume_messages():
             value_deserializer=lambda x: json.loads(x.decode('utf-8'))
         )
         for message in consumer:
-            print("Received message:", message.value)  # Thêm dòng này để kiểm tra dữ liệu nhận được
+            print("Received message:", message.value)
             try:
                 insert_data(message.value)
             except KeyError as e:
@@ -176,12 +171,7 @@ def consume_messages():
 
 # Hàm để đọc dữ liệu từ MySQL và gửi tới Kafka khác
 def stream_mysql_to_kafka():
-    conn = mysql.connector.connect(
-        user='mike',
-        password='123',
-        host='localhost',
-        database='stock_stream'
-    )
+    conn = mysql.connector.connect(**mysql_config)
     cursor = conn.cursor(dictionary=True)
     
     query = "SELECT * FROM stock_data"
@@ -189,7 +179,7 @@ def stream_mysql_to_kafka():
     rows = cursor.fetchall()
     
     producer = KafkaProducer(
-        bootstrap_servers='localhost:9092',  # Sử dụng cùng Kafka cluster
+        bootstrap_servers='localhost:9092',
         value_serializer=lambda v: json.dumps(v).encode('utf-8')
     )
     

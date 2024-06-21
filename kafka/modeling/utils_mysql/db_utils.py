@@ -1,3 +1,4 @@
+import datetime
 import json
 
 import mysql.connector
@@ -74,7 +75,6 @@ def insert_data(data):
     conn = mysql.connector.connect(**mysql_config)
     cursor = conn.cursor()
 
-    # Check if the record already exists
     query = """
     SELECT COUNT(*) FROM stock_data
     WHERE Ticker = %s AND Datetime = %s
@@ -83,7 +83,6 @@ def insert_data(data):
     count = cursor.fetchone()[0]
 
     if count == 0:
-        # If the record does not exist, insert it
         query = """
         INSERT INTO stock_data (Ticker, Datetime, Open, High, Low, Close, Volume)
         VALUES (%s, %s, %s, %s, %s, %s, %s)
@@ -126,6 +125,55 @@ def stream_mysql_to_kafka():
     for row in rows:
         producer.send('mysql-to-postgres', value=row)
         producer.flush()
+
+    cursor.close()
+    conn.close()
+
+def get_start_of_current_day():
+    now = datetime.datetime.now()
+    return datetime.datetime(now.year, now.month, now.day)
+
+def consolidate_minute_data_to_daily(ticker):
+    conn = mysql.connector.connect(**mysql_config)
+    cursor = conn.cursor()
+
+    query = """
+    SELECT 
+        Ticker, 
+        DATE(Datetime) as Date, 
+        MIN(Open) as Open, 
+        MAX(High) as High, 
+        MIN(Low) as Low, 
+        MAX(Datetime) as CloseTime,
+        (SELECT Close FROM stock_data WHERE Ticker = %s AND Datetime = CloseTime) as Close,
+        SUM(Volume) as Volume
+    FROM stock_data
+    WHERE Ticker = %s AND DATE(Datetime) = CURDATE() - INTERVAL 1 DAY
+    GROUP BY Ticker, Date
+    """
+    
+    cursor.execute(query, (ticker, ticker))
+    consolidated_data = cursor.fetchall()
+    
+    if consolidated_data:
+        for row in consolidated_data:
+            consolidated_row = {
+                'Ticker': row[0],
+                'Datetime': row[1].strftime('%Y-%m-%d 00:00:00'),
+                'Open': row[2],
+                'High': row[3],
+                'Low': row[4],
+                'Close': row[6],
+                'Volume': row[7]
+            }
+            insert_data(consolidated_row)
+        
+        delete_query = """
+        DELETE FROM stock_data
+        WHERE Ticker = %s AND DATE(Datetime) = CURDATE() - INTERVAL 1 DAY
+        """
+        cursor.execute(delete_query, (ticker,))
+        conn.commit()
 
     cursor.close()
     conn.close()

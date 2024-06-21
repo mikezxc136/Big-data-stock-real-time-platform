@@ -4,9 +4,10 @@ import threading
 import time
 
 import pandas as pd
-import utils
-from utils_mysql.db_utils import (create_database_and_table,
+from utils_mysql.db_utils import (consolidate_minute_data_to_daily,
+                                  create_database_and_table,
                                   get_last_processed_time,
+                                  get_start_of_current_day,
                                   stream_mysql_to_kafka)
 from utils_mysql.kafka_utils import (consume_messages, send_to_kafka,
                                      verify_streamed_data)
@@ -49,12 +50,17 @@ def main():
     while True:
         try:
             current_time = datetime.datetime.now()
-            recent_start_time = current_time - datetime.timedelta(days=1)
+            recent_start_time = get_start_of_current_day()
             for ticker in tickers:
                 recent_data = fetch_stock_data(ticker, recent_start_time, current_time, interval='1m')
                 if not recent_data.empty:
                     send_to_kafka(recent_data, producer, 'stock_topic', ticker)
             time.sleep(600)  # Đợi 10 phút trước khi lấy dữ liệu mới
+            
+            if current_time.hour == 0 and current_time.minute == 0:
+                for ticker in tickers:
+                    consolidate_minute_data_to_daily(ticker)
+
         except Exception as e:
             print(f"Error fetching or sending data: {e}")
 

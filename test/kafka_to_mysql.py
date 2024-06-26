@@ -1,10 +1,8 @@
-
-
-
 import datetime
 import json
 import threading
 import time
+from typing import Dict, Optional
 
 import mysql.connector
 import pandas as pd
@@ -12,29 +10,23 @@ import yfinance as yf
 
 from kafka import KafkaConsumer, KafkaProducer
 
-# Path to the CSV file containing tickers
 CSV_FILE_PATH = 'D:\\Github Mikezxc\\Big-data-stock-real-time-platform\\kafka\\modeling\\tickers.csv'
-
-# Path to the MySQL configuration file
 MYSQL_CONFIG_PATH = 'D:\\Github Mikezxc\\Big-data-stock-real-time-platform\\kafka\\modeling\\config\\env_mysql.json'
 
-# Hàm để đọc cấu hình MySQL từ file JSON
-def load_mysql_config():
+def load_mysql_config() -> Dict:
     with open(MYSQL_CONFIG_PATH, 'r') as file:
         return json.load(file)
 
 mysql_config = load_mysql_config()
 
-# Hàm để lấy dữ liệu cổ phiếu
-def fetch_stock_data(ticker, start_date, end_date, interval='1d'):
+def fetch_stock_data(ticker: str, start_date: datetime.datetime, end_date: datetime.datetime, interval: str) -> pd.DataFrame:
     stock = yf.Ticker(ticker)
     data = stock.history(start=start_date, end=end_date, interval=interval)
     data.reset_index(inplace=True)
     return data
 
-# Hàm để gửi dữ liệu vào Kafka
-def send_to_kafka(data, producer, topic, ticker):
-    for index, row in data.iterrows():
+def send_to_kafka(data: pd.DataFrame, producer: KafkaProducer, topic: str, ticker: str, timeframe: str) -> None:
+    for _, row in data.iterrows():
         datetime_key = 'Datetime' if 'Datetime' in row else 'Date'
         message = {
             'Ticker': ticker,
@@ -43,14 +35,15 @@ def send_to_kafka(data, producer, topic, ticker):
             'High': float(row['High']),
             'Low': float(row['Low']),
             'Close': float(row['Close']),
-            'Volume': int(row['Volume'])
+            'Volume': int(row['Volume']),
+            'Timeframe': timeframe
         }
         producer.send(topic, value=message)
         producer.flush()
     if not data.empty:
         update_last_processed_time(ticker, data[datetime_key].max())
 
-def update_last_processed_time(ticker, last_processed_time):
+def update_last_processed_time(ticker: str, last_processed_time: datetime.datetime) -> None:
     conn = mysql.connector.connect(**mysql_config)
     cursor = conn.cursor()
     query = """
@@ -64,7 +57,7 @@ def update_last_processed_time(ticker, last_processed_time):
     cursor.close()
     conn.close()
 
-def get_last_processed_time(ticker):
+def get_last_processed_time(ticker: str) -> Optional[datetime.datetime]:
     conn = mysql.connector.connect(**mysql_config)
     cursor = conn.cursor()
     query = "SELECT LastProcessedTime FROM ticker_status WHERE Ticker = %s"
@@ -74,8 +67,7 @@ def get_last_processed_time(ticker):
     conn.close()
     return result[0] if result else None
 
-# Hàm để tạo database và bảng nếu chưa tồn tại
-def create_database_and_table():
+def create_database_and_table() -> None:
     conn = mysql.connector.connect(
         user=mysql_config['user'],
         password=mysql_config['password'],
@@ -83,7 +75,6 @@ def create_database_and_table():
         port=mysql_config['port']
     )
     cursor = conn.cursor()
-    
     cursor.execute("CREATE DATABASE IF NOT EXISTS stock_stream")
     cursor.execute("USE stock_stream")
     cursor.execute("""
@@ -95,7 +86,8 @@ def create_database_and_table():
         High FLOAT,
         Low FLOAT,
         Close FLOAT,
-        Volume INT
+        Volume INT,
+        Timeframe VARCHAR(10)
     )
     """)
     cursor.execute("""
@@ -104,29 +96,23 @@ def create_database_and_table():
         LastProcessedTime DATETIME
     )
     """)
-    
     conn.commit()
     cursor.close()
     conn.close()
 
-# Hàm để chèn dữ liệu vào MySQL
-def insert_data(data):
+def insert_data(data: Dict) -> None:
     conn = mysql.connector.connect(**mysql_config)
     cursor = conn.cursor()
-
-    # Check if the record already exists
     query = """
     SELECT COUNT(*) FROM stock_data
-    WHERE Ticker = %s AND Datetime = %s
+    WHERE Ticker = %s AND Datetime = %s AND Timeframe = %s
     """
-    cursor.execute(query, (data['Ticker'], data['Datetime']))
+    cursor.execute(query, (data['Ticker'], data['Datetime'], data['Timeframe']))
     count = cursor.fetchone()[0]
-
     if count == 0:
-        # If the record does not exist, insert it
         query = """
-        INSERT INTO stock_data (Ticker, Datetime, Open, High, Low, Close, Volume)
-        VALUES (%s, %s, %s, %s, %s, %s, %s)
+        INSERT INTO stock_data (Ticker, Datetime, Open, High, Low, Close, Volume, Timeframe)
+        VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
         ON DUPLICATE KEY UPDATE
             Open = VALUES(Open),
             High = VALUES(High),
@@ -134,24 +120,16 @@ def insert_data(data):
             Close = VALUES(Close),
             Volume = VALUES(Volume)
         """
-        values = (
-            data['Ticker'],
-            data['Datetime'],
-            data['Open'],
-            data['High'],
-            data['Low'],
-            data['Close'],
-            data['Volume']
-        )
-
-        cursor.execute(query, values)
+        cursor.execute(query, (
+            data['Ticker'], data['Datetime'], data['Open'],
+            data['High'], data['Low'], data['Close'], data['Volume'],
+            data['Timeframe']
+        ))
         conn.commit()
-
     cursor.close()
     conn.close()
 
-# Hàm tiêu thụ dữ liệu từ Kafka và chèn vào MySQL
-def consume_messages():
+def consume_messages() -> None:
     try:
         consumer = KafkaConsumer(
             'stock_topic',
@@ -161,9 +139,10 @@ def consume_messages():
             group_id='my-group',
             value_deserializer=lambda x: json.loads(x.decode('utf-8'))
         )
+        print("Started consuming messages from Kafka topic: 'stock_topic'")
         for message in consumer:
-            print("Received message:", message.value)
             try:
+                print(f"Received message: {message.value}")
                 insert_data(message.value)
             except KeyError as e:
                 print(f"KeyError: {e} in message {message.value}")
@@ -172,29 +151,23 @@ def consume_messages():
     except Exception as e:
         print(f"Error setting up Kafka consumer: {e}")
 
-# Hàm để đọc dữ liệu từ MySQL và gửi tới Kafka khác
-def stream_mysql_to_kafka():
+def stream_mysql_to_kafka() -> None:
     conn = mysql.connector.connect(**mysql_config)
     cursor = conn.cursor(dictionary=True)
-    
     query = "SELECT * FROM stock_data"
     cursor.execute(query)
     rows = cursor.fetchall()
-    
     producer = KafkaProducer(
         bootstrap_servers='localhost:9092',
         value_serializer=lambda v: json.dumps(v).encode('utf-8')
     )
-    
     for row in rows:
         producer.send('mysql-to-postgres', value=row)
         producer.flush()
-    
     cursor.close()
     conn.close()
 
-# Hàm để xác minh dữ liệu đã được stream tới topic mới của Kafka
-def verify_streamed_data():
+def verify_streamed_data() -> None:
     consumer = KafkaConsumer(
         'mysql-to-postgres',
         bootstrap_servers='localhost:9092',
@@ -203,53 +176,43 @@ def verify_streamed_data():
         group_id='verification-group',
         value_deserializer=lambda x: json.loads(x.decode('utf-8'))
     )
-
-    print("Listening to 'mysql-to-postgres' topic...")
+    print("Started verifying streamed data from Kafka topic: 'mysql-to-postgres'")
     for message in consumer:
-        print(f"Received message: {message.value}")
+        print(f"Received message for verification: {message.value}")
 
-# Hàm chính
-def main():
-    # Thiết lập Kafka producer
+def main() -> None:
     producer = KafkaProducer(
         bootstrap_servers='localhost:9092',
         value_serializer=lambda v: json.dumps(v).encode('utf-8')
     )
-
-    # Tạo database và bảng nếu chưa tồn tại
     create_database_and_table()
-
-    # Tạo một thread để tiêu thụ dữ liệu từ Kafka và chèn vào MySQL
     consumer_thread = threading.Thread(target=consume_messages, daemon=True)
     consumer_thread.start()
-
-    # Đọc file CSV để lấy danh sách ticker
     tickers_df = pd.read_csv(CSV_FILE_PATH)
     tickers = tickers_df['Ticker'].tolist()
-
-    # Lấy dữ liệu cổ phiếu và gửi vào Kafka
     end_date = datetime.datetime.now()
 
     for ticker in tickers:
         last_processed_time = get_last_processed_time(ticker)
         start_date = last_processed_time if last_processed_time else datetime.datetime(2015, 1, 1)
         historical_data = fetch_stock_data(ticker, start_date, end_date, interval='1d')
-        send_to_kafka(historical_data, producer, 'stock_topic', ticker)
+        send_to_kafka(historical_data, producer, 'stock_topic', ticker, '1d')
 
-    # Continue fetching recent data in 1-minute intervals
+    recent_start_time = end_date - datetime.timedelta(days=7)
+    intervals = ['1h', '15m', '5m', '1m']
+
     while True:
         try:
             current_time = datetime.datetime.now()
-            recent_start_time = current_time - datetime.timedelta(days=1)
             for ticker in tickers:
-                recent_data = fetch_stock_data(ticker, recent_start_time, current_time, interval='1m')
-                if not recent_data.empty:
-                    send_to_kafka(recent_data, producer, 'stock_topic', ticker)
-            time.sleep(600)  # Đợi 10 phút trước khi lấy dữ liệu mới
+                for interval in intervals:
+                    recent_data = fetch_stock_data(ticker, recent_start_time, current_time, interval=interval)
+                    if not recent_data.empty:
+                        send_to_kafka(recent_data, producer, 'stock_topic', ticker, interval)
+            time.sleep(60)
         except Exception as e:
             print(f"Error fetching or sending data: {e}")
 
-    # Tạo một thread để xác minh dữ liệu đã được stream tới topic mới của Kafka
     verification_thread = threading.Thread(target=verify_streamed_data, daemon=True)
     verification_thread.start()
 

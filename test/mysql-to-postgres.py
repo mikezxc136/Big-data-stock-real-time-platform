@@ -1,5 +1,6 @@
 import datetime
 import json
+import logging
 import threading
 import time
 
@@ -8,6 +9,7 @@ import psycopg2
 
 from kafka import KafkaConsumer, KafkaProducer
 
+logging.basicConfig(level=logging.INFO)
 
 def create_tables():
     conn = psycopg2.connect(
@@ -30,7 +32,8 @@ def create_tables():
     DROP TABLE IF EXISTS dim_date CASCADE;
     CREATE TABLE dim_date (
         date_id SERIAL PRIMARY KEY,
-        date TIMESTAMP NOT NULL UNIQUE
+        date TIMESTAMP NOT NULL UNIQUE,
+        timeframe VARCHAR(10) NOT NULL
     );
     """)
 
@@ -50,6 +53,7 @@ def create_tables():
     CREATE TABLE fact_stock (
         stock_id INT REFERENCES dim_stock(stock_id),
         date_id INT REFERENCES dim_date(date_id),
+        price_id INT REFERENCES dim_price(price_id),
         volume BIGINT,
         PRIMARY KEY (stock_id, date_id)
     );
@@ -58,7 +62,6 @@ def create_tables():
     conn.commit()
     cursor.close()
     conn.close()
-
 
 def stream_mysql_to_kafka():
     conn = mysql.connector.connect(
@@ -75,18 +78,24 @@ def stream_mysql_to_kafka():
 
     producer = KafkaProducer(
         bootstrap_servers='localhost:9092',
-        value_serializer=lambda v: json.dumps(v, default=str).encode('utf-8')
+        value_serializer=lambda v: json.dumps(v, default=str).encode('utf-8'),
+        batch_size=16384,
+        linger_ms=10,
+        retries=5,
+        compression_type='gzip'
     )
 
     for row in rows:
         if 'Datetime' in row and isinstance(row['Datetime'], datetime.datetime):
             row['Datetime'] = row['Datetime'].strftime('%Y-%m-%d %H:%M:%S')
-        producer.send('mysql-to-postgres', value=row)
+        try:
+            producer.send('mysql-to-postgres', value=row)
+        except Exception as e:
+            logging.error(f"Error sending message to Kafka: {e}")
         producer.flush()
 
     cursor.close()
     conn.close()
-
 
 def insert_data(data):
     conn = psycopg2.connect(
@@ -106,10 +115,10 @@ def insert_data(data):
     stock_id = cursor.fetchone()[0]
 
     cursor.execute("""
-    INSERT INTO dim_date (date)
-    VALUES (%s)
+    INSERT INTO dim_date (date, timeframe)
+    VALUES (%s, %s)
     ON CONFLICT (date) DO NOTHING;
-    """, (data['Datetime'],))
+    """, (data['Datetime'], data['Timeframe']))
     cursor.execute("SELECT date_id FROM dim_date WHERE date = %s", (data['Datetime'],))
     date_id = cursor.fetchone()[0]
 
@@ -130,28 +139,28 @@ def insert_data(data):
     cursor.close()
     conn.close()
 
-
 def consume_messages():
     try:
         consumer = KafkaConsumer(
             'mysql-to-postgres',
             bootstrap_servers='localhost:9092',
-            auto_offset_reset='latest',
-            enable_auto_commit=True,
+            auto_offset_reset='earliest',
+            enable_auto_commit=False,
             group_id='my-group',
-            value_deserializer=lambda x: json.loads(x.decode('utf-8'))
+            value_deserializer=lambda x: json.loads(x.decode('utf-8')),
+            max_poll_records=500
         )
         for message in consumer:
-            print("Received message:", message.value)
+            logging.info(f"Received message: {message.value}")
             try:
                 insert_data(message.value)
+                consumer.commit()
             except KeyError as e:
-                print(f"KeyError: {e} in message {message.value}")
+                logging.error(f"KeyError: {e} in message {message.value}")
             except Exception as e:
-                print(f"Error inserting data: {e}")
+                logging.error(f"Error inserting data: {e}")
     except Exception as e:
-        print(f"Error setting up Kafka consumer: {e}")
-
+        logging.error(f"Error setting up Kafka consumer: {e}")
 
 def main():
     create_tables()
@@ -163,7 +172,6 @@ def main():
 
     while True:
         time.sleep(6000)
-
 
 if __name__ == "__main__":
     main()

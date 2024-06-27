@@ -209,7 +209,7 @@ def main() -> None:
                     recent_data = fetch_stock_data(ticker, recent_start_time, current_time, interval=interval)
                     if not recent_data.empty:
                         send_to_kafka(recent_data, producer, 'stock_topic', ticker, interval)
-            time.sleep(60)
+            time.sleep(300)
         except Exception as e:
             print(f"Error fetching or sending data: {e}")
 

@@ -5,7 +5,7 @@ from kafka import KafkaConsumer
 
 def verify_streamed_data():
     consumer = KafkaConsumer(
-        'mysql-to-postgres',
+        'postgres-dim_date',
         bootstrap_servers='localhost:9092',
         auto_offset_reset='earliest',
         enable_auto_commit=True,
@@ -13,7 +13,7 @@ def verify_streamed_data():
         value_deserializer=lambda x: json.loads(x.decode('utf-8'))
     )
 
-    print("Listening to 'mysql-to-postgres' topic...")
+    print("Listening to 'postgres-dim_date' topic...")
 
     with open('output.txt', 'a') as file:
         for message in consumer:

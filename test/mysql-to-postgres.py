@@ -59,6 +59,14 @@ def create_tables():
     );
     """)
 
+    cursor.execute("""
+    DROP TABLE IF EXISTS ticker_status CASCADE;
+    CREATE TABLE IF NOT EXISTS ticker_status (
+        ticker VARCHAR(10) PRIMARY KEY,
+        last_processed_time TIMESTAMP
+    );
+    """)
+
     conn.commit()
     cursor.close()
     conn.close()
@@ -97,7 +105,45 @@ def stream_mysql_to_kafka():
     cursor.close()
     conn.close()
 
+def update_last_processed_time(ticker, last_processed_time):
+    conn = psycopg2.connect(
+        dbname="test",
+        user="postgres",
+        password="123",
+        host="localhost"
+    )
+    cursor = conn.cursor()
+    cursor.execute("""
+    INSERT INTO ticker_status (ticker, last_processed_time)
+    VALUES (%s, %s)
+    ON CONFLICT (ticker) DO UPDATE SET last_processed_time = EXCLUDED.last_processed_time;
+    """, (ticker, last_processed_time))
+    conn.commit()
+    cursor.close()
+    conn.close()
+
+def get_last_processed_time(ticker):
+    conn = psycopg2.connect(
+        dbname="test",
+        user="postgres",
+        password="123",
+        host="localhost"
+    )
+    cursor = conn.cursor()
+    cursor.execute("SELECT last_processed_time FROM ticker_status WHERE ticker = %s", (ticker,))
+    result = cursor.fetchone()
+    cursor.close()
+    conn.close()
+    return result[0] if result else None
+
 def insert_data(data):
+    last_processed_time = get_last_processed_time(data['Ticker'])
+    data_datetime = datetime.datetime.strptime(data['Datetime'], '%Y-%m-%d %H:%M:%S')
+
+    if last_processed_time and data_datetime <= last_processed_time:
+        logging.info(f"Data for {data['Ticker']} at {data['Datetime']} already processed.")
+        return  # Skip if data is not newer
+
     conn = psycopg2.connect(
         dbname="test",
         user="postgres",
@@ -118,8 +164,8 @@ def insert_data(data):
     INSERT INTO dim_date (date, timeframe)
     VALUES (%s, %s)
     ON CONFLICT (date) DO NOTHING;
-    """, (data['Datetime'], data['Timeframe']))
-    cursor.execute("SELECT date_id FROM dim_date WHERE date = %s", (data['Datetime'],))
+    """, (data_datetime, data['Timeframe']))
+    cursor.execute("SELECT date_id FROM dim_date WHERE date = %s", (data_datetime,))
     date_id = cursor.fetchone()[0]
 
     cursor.execute("""
@@ -138,6 +184,8 @@ def insert_data(data):
     conn.commit()
     cursor.close()
     conn.close()
+
+    update_last_processed_time(data['Ticker'], data_datetime)
 
 def consume_messages():
     try:

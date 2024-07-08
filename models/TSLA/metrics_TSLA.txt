@@ -1,0 +1,7 @@
+Metrics for TSLA:
+Mean Squared Error (MSE): 218.9306820730812
+Root Mean Squared Error (RMSE): 14.796306365883385
+R-squared (R2): 0.8726059415427955
+Mean Absolute Error (MAE): 11.982542619593001
+Accuracy (within 5% tolerance): 51.05042016806722%
+--------------------------

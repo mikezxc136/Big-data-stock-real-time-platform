@@ -1,0 +1,7 @@
+Metrics for GOOGL:
+Mean Squared Error (MSE): 39.302001219597514
+Root Mean Squared Error (RMSE): 6.269130818510451
+R-squared (R2): 0.9442706821393136
+Mean Absolute Error (MAE): 5.342826390421891
+Accuracy (within 5% tolerance): 67.85714285714286%
+--------------------------

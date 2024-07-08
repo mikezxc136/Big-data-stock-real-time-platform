@@ -1,0 +1,7 @@
+Metrics for AAPL:
+Mean Squared Error (MSE): 15.886690410132681
+Root Mean Squared Error (RMSE): 3.9858111357831145
+R-squared (R2): 0.9640448481621426
+Mean Absolute Error (MAE): 3.188053172007328
+Accuracy (within 5% tolerance): 97.05882352941177%
+--------------------------

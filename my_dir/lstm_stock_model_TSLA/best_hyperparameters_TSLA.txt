@@ -1,0 +1,6 @@
+Stock: TSLA
+The hyperparameter search is complete. The optimal number of layers is 3.
+Layer 1: 160 units
+Layer 2: 352 units
+Layer 3: 160 units
+The optimal learning rate for the optimizer is 0.00034786388011680107.

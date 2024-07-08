@@ -1,5 +1,6 @@
 import datetime
 import json
+import logging
 import threading
 import time
 from typing import Dict, Optional
@@ -196,7 +197,8 @@ def main() -> None:
         last_processed_time = get_last_processed_time(ticker)
         start_date = last_processed_time if last_processed_time else datetime.datetime(2015, 1, 1)
         historical_data = fetch_stock_data(ticker, start_date, end_date, interval='1d')
-        send_to_kafka(historical_data, producer, 'stock_topic', ticker, '1d')
+        if not historical_data.empty:
+            send_to_kafka(historical_data, producer, 'stock_topic', ticker, '1d')
 
     recent_start_time = end_date - datetime.timedelta(days=7)
     intervals = ['1h', '15m', '5m', '1m']
@@ -205,11 +207,12 @@ def main() -> None:
         try:
             current_time = datetime.datetime.now()
             for ticker in tickers:
+                last_processed_time = get_last_processed_time(ticker) or recent_start_time
                 for interval in intervals:
-                    recent_data = fetch_stock_data(ticker, recent_start_time, current_time, interval=interval)
+                    recent_data = fetch_stock_data(ticker, last_processed_time, current_time, interval=interval)
                     if not recent_data.empty:
                         send_to_kafka(recent_data, producer, 'stock_topic', ticker, interval)
-            time.sleep(300)
+            time.sleep(600)
         except Exception as e:
             print(f"Error fetching or sending data: {e}")
 

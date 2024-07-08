@@ -1,0 +1,7 @@
+Metrics for MSFT:
+Mean Squared Error (MSE): 136.99382544002432
+Root Mean Squared Error (RMSE): 11.704436143617698
+R-squared (R2): 0.9723947661063579
+Mean Absolute Error (MAE): 9.681149876698727
+Accuracy (within 5% tolerance): 89.70588235294117%
+--------------------------

@@ -1,0 +1,7 @@
+Metrics for AMZN:
+Mean Squared Error (MSE): 30.832509203819694
+Root Mean Squared Error (RMSE): 5.552702873720121
+R-squared (R2): 0.9705591064443696
+Mean Absolute Error (MAE): 4.346084290448356
+Accuracy (within 5% tolerance): 74.78991596638656%
+--------------------------

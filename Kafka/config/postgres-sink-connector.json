@@ -1,0 +1,16 @@
+{
+  "name": "stock-data-sink-connector",
+  "config": {
+    "connector.class": "io.confluent.connect.jdbc.JdbcSinkConnector",
+    "tasks.max": "1",
+    "topics": "stock_topic",
+    "connection.url": "jdbc:postgresql://localhost:5432/test",
+    "connection.user": "postgres",
+    "connection.password": "123",
+    "insert.mode": "insert",
+    "auto.create": "true",
+    "auto.evolve": "true",
+    "table.name.format": "stock_data",
+    "pk.mode": "none"
+  }
+}
